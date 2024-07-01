@@ -88,7 +88,7 @@ def part1_animation(viewer, target_pos):
     marker = viewer.create_marker(target_pos, [1, 0, 0, 1])
     
     joint_name, joint_parent, joint_initial_position = viewer.get_meta_data()
-    meta_data = MetaData(joint_name, joint_parent, joint_initial_position, 'lToeJoint_end', 'lWrist_end')
+    meta_data = MetaData(joint_name, joint_parent, joint_initial_position, 'lShoulder', 'lWrist_end')
     joint_position = viewer.get_joint_positions()
     joint_orientation = viewer.get_joint_orientations()
     class UpdateHandle:
@@ -175,7 +175,7 @@ def main():
     # part2
     # part2(viewer, 'data/walk60.bvh')
     
-    # bonus(viewer, np.array([0.5, 0.5, 0.5]), np.array([0, 0.5, 0.5]))
+    bonus(viewer, np.array([0.5, 0.5, 0.5]), np.array([0, 0.5, 0.5]))
 
 if __name__ == "__main__":
     main()

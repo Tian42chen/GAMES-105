@@ -11,6 +11,15 @@ def part1(viewer, bvh_file_path):
     viewer.show_rest_pose(joint_name, joint_parent, joint_offset)
     viewer.run()
 
+def part1_test(bvh_file_path):
+    """
+    part1 测试函数
+    """
+    joint_name, joint_parent, joint_offset = part1_calculate_T_pose(bvh_file_path)
+    print(joint_name)
+    print(joint_parent)
+    print(joint_offset)
+
 
 def part2_one_pose(viewer, bvh_file_path):
     """
@@ -21,6 +30,16 @@ def part2_one_pose(viewer, bvh_file_path):
     joint_positions, joint_orientations = part2_forward_kinematics(joint_name, joint_parent, joint_offset, motion_data, 0)
     viewer.show_pose(joint_name, joint_positions, joint_orientations)
     viewer.run()
+
+def part2_one_pose_test(bvh_file_path):
+    """
+    part2 测试函数
+    """
+    joint_name, joint_parent, joint_offset = part1_calculate_T_pose(bvh_file_path)
+    motion_data = load_motion_data(bvh_file_path)
+    joint_positions, joint_orientations = part2_forward_kinematics(joint_name, joint_parent, joint_offset, motion_data, 0)
+    print(joint_positions)
+    print(joint_orientations)
 
 
 def part2_animation(viewer, bvh_file_path):
@@ -67,23 +86,55 @@ def part3_retarget(viewer, T_pose_bvh_path, A_pose_bvh_path):
     viewer.update_func = handle.update_func
     viewer.run()
 
+def part3_retarget_one_pose(viewer, T_pose_bvh_path, A_pose_bvh_path):
+    """
+    part3 读取一桢的pose, 完成part3_retarget_func函数
+    """
+    joint_name, joint_parent, joint_offset = part1_calculate_T_pose(T_pose_bvh_path)
+    retarget_motion_data = part3_retarget_func(T_pose_bvh_path, A_pose_bvh_path)
+    joint_positions, joint_orientations = part2_forward_kinematics(joint_name, joint_parent, joint_offset, retarget_motion_data, 0)
+    viewer.show_pose(joint_name, joint_positions, joint_orientations)
+    viewer.run()
+
+
+def part3_test(T_pose_bvh_path, A_pose_bvh_path):
+    """
+    part3 测试函数
+    """
+    joint_name, joint_parent, joint_offset = part1_calculate_T_pose(T_pose_bvh_path)
+    retarget_motion_data = part3_retarget_func(T_pose_bvh_path, A_pose_bvh_path)
+    joint_positions, joint_orientations = part2_forward_kinematics(joint_name, joint_parent, joint_offset, retarget_motion_data, 0)
+    print(joint_positions)
+    print(joint_orientations)
+
 
 def main():
     # create a viewer
     viewer = SimpleViewer()
     bvh_file_path = "data/walk60.bvh"
+    # bvh_file_path = "data/A_pose_run.bvh"
 
     # 请取消注释需要运行的代码
     # part1
     # part1(viewer, bvh_file_path)
 
     # part2
-    # part2_one_pose(viewer, bvh_file_path)
+    part2_one_pose(viewer, bvh_file_path)
     # part2_animation(viewer, bvh_file_path)
 
     # part3
+    # part3_retarget_one_pose(viewer, "data/walk60.bvh", "data/A_pose_run.bvh")
     part3_retarget(viewer, "data/walk60.bvh", "data/A_pose_run.bvh")
 
 
+def test():
+    # test
+    bvh_file_path = "data/walk60.bvh"
+
+    # part1_test(bvh_file_path)
+    # part2_one_pose_test(bvh_file_path)
+    part3_test("data/walk60.bvh", "data/A_pose_run.bvh")
+
 if __name__ == "__main__":
+    # test()
     main()
