@@ -359,6 +359,7 @@ class SimpleViewer(ShowBase):
         for i in range(len(joint_pos)):
             joint.append(self.create_joint(i, joint_pos[i], 'end' in joint_name[i]))
             if i < body_pos.shape[0]:
+                # body.append(self.create_joint(i, body_pos[i], True))
                 body.append(self.create_link(i, body_pos[i], scale[i], rot = body_rot[i] if body_rot is not None else None))
                 body[-1].wrtReparentTo(joint[-1])
         
@@ -403,15 +404,14 @@ class SimpleViewer(ShowBase):
         
         for i in range(length):
             self.set_joint_position_orientation(joint_name_list[i], joint_positions[i], joint_orientations[i])
-    def show_rest_pose(self, joint_name, joint_parent, joint_offset):
+
+    def show_rest_pose(self):
+        joint_name = self.joint_name 
+        joint_parent = self.parent_index
         length = len(joint_name)
-        joint_positions = np.zeros((length, 3), dtype=np.float64)
+        joint_positions = self.init_joint_pos
         joint_orientations = np.zeros((length, 4), dtype=np.float64)
         for i in range(length):
-            if joint_parent[i] == -1:
-                joint_positions[i] = joint_offset[i]
-            else:
-                joint_positions[i] = joint_positions[joint_parent[i]] + joint_offset[i]
             joint_orientations[i, 3] = 1.0
             self.set_joint_position_orientation(joint_name[i], joint_positions[i], joint_orientations[i])
 
