@@ -1,16 +1,75 @@
 # 以下部分均为可更改部分
+# Toturial: https://theorangeduck.com/page/code-vs-data-driven-displacement
+# repo: https://github.com/orangeduck/Motion-Matching
 
-from answer_task1 import *
+from answer_task1 import BVHMotion, translation_motions
+import os
+import numpy as np
+from scipy.spatial.transform import Rotation as R
+from utils import grep_motion, get_features, get_features_hat
+from smooth_utils import decay_spring_implicit_damping_pos, decay_spring_implicit_damping_rot
 
 class CharacterController():
-    def __init__(self, controller) -> None:
+    def __init__(self, controller, path) -> None:
         self.motions = []
-        self.motions.append(BVHMotion('motion_material/walk_forward.bvh'))
+        self.features = []
+        self.entry2idx = []
+        self.idx2entry = []
+        self.max_length = 120
+        total_length = 0
+        motion_paths = grep_motion(path)
+        joint_name = None
+        for idx, motion_path in enumerate(motion_paths):
+            # Motion-Matching/resources/generate_database.py#98L add sim bone
+            motion = BVHMotion(motion_path) 
+            if "idle" in motion_path:
+                idle_idx = idx
+            if joint_name is None:
+                joint_name = motion.joint_name
+            motion.adjust_joint_name(joint_name)
+            # get features
+            feature = get_features(motion, self.max_length) 
+            feature_length = feature.shape[0]
+            start = total_length
+            end = total_length + feature_length
+            self.motions.append(motion)
+            self.features.append(feature) 
+            self.entry2idx.append((start, end))
+            self.idx2entry.append(np.ones(feature_length, dtype=np.int32) * idx)
+            total_length += feature_length
+
+        self.features = np.concatenate(self.features, axis=0)
+        self.idx2entry = np.concatenate(self.idx2entry, axis=0)
+
+        self.mean, self.std = self.cal_state(self.features)
+        self.features = self.normalize_features(self.features)
+
         self.controller = controller
-        self.cur_root_pos = None
-        self.cur_root_rot = None
+        # idle motion
+        self.cur_motion = self.motions[idle_idx].translation_and_rotation(0, [0, 0], [0, 1])
+        self.cur_entry = idle_idx
         self.cur_frame = 0
+        self.bias = 0
+        self.cur_root_pos = self.cur_motion.joint_position[self.cur_frame, 0]
+        self.cur_root_rot = R.from_quat(self.cur_motion.joint_rotation[self.cur_frame, 0]).apply(np.array([0., 0., 1.]))
+        self.N = 60
+        self.joint_name = self.cur_motion.joint_name
+        self.joint_translation, self.joint_orientation = self.cur_motion.batch_forward_kinematics()
         pass
+
+    def cal_state(self, features):
+        """
+            get mean and std of features
+        """
+        mean = np.mean(features, axis=0)
+        std = np.std(features, axis=0)
+        return mean, std
+    
+    def normalize_features(self, features):
+        """
+            normalize features
+        """
+        return (features - self.mean) / self.std
     
     def update_state(self, 
                      desired_pos_list, 
@@ -38,17 +97,44 @@ class CharacterController():
             分别对应着面朝向移动速度,侧向移动速度和向后移动速度.目前根据LAFAN的统计数据设为(1.75,1.5,1.25)
             如果和你的角色动作速度对不上,你可以在init或这里对属性进行修改
         '''
-        # 一个简单的例子，输出第i帧的状态
-        joint_name = self.motions[0].joint_name
-        joint_translation, joint_orientation = self.motions[0].batch_forward_kinematics()
-        joint_translation = joint_translation[self.cur_frame]
-        joint_orientation = joint_orientation[self.cur_frame]
+        if self.cur_frame % self.N == 0 or self.cur_frame + 1 >= self.cur_motion.motion_length:
+            # print(f"Current frame: {self.cur_frame}")
+            # print("Start motion matching")
+            x_hat = get_features_hat(self.cur_motion, self.cur_frame, desired_pos_list, desired_rot_list)
+            x_hat = self.normalize_features(x_hat)
+            k = np.argmin(np.linalg.norm(self.features - x_hat, axis=1))
+            entry = self.idx2entry[k]
+            start, end = self.entry2idx[entry]
+            # print(f"Matched entry: {entry}, idx: {k - start}")
+            if self.cur_entry != entry or self.cur_frame + self.bias != k - start:
+                # print(f"Switch from {self.cur_entry} to {entry}")
+                self.cur_motion = translation_motions(self.cur_motion, self.motions[entry], self.cur_frame, k - start, self.max_length)
+                self.cur_entry = entry
+                self.cur_frame = 0
+                self.bias = k - start
+                self.joint_name = self.cur_motion.joint_name
+                self.joint_translation, self.joint_orientation = self.cur_motion.batch_forward_kinematics()
+
+                # self.cur_motion = self.motions[entry].translation_and_rotation(k - start, self.cur_root_pos[::2], self.cur_root_rot[::2])
+                # self.cur_entry = entry
+                # self.cur_frame = k - start
+                # self.joint_name = self.cur_motion.joint_name
+                # self.joint_translation, self.joint_orientation = self.cur_motion.batch_forward_kinematics()
+
+        joint_translation = self.joint_translation[self.cur_frame]
+        joint_orientation = self.joint_orientation[self.cur_frame]
         
         self.cur_root_pos = joint_translation[0]
         self.cur_root_rot = joint_orientation[0]
-        self.cur_frame = (self.cur_frame + 1) % self.motions[0].motion_length
-        
-        return joint_name, joint_translation, joint_orientation
+        # self.cur_root_rot = R.from_quat(joint_orientation[0]).apply(np.array([0., 0., 1.]))
+        self.cur_frame += 1
+
+        velocity = self.joint_translation[self.cur_frame + 1][0] - self.joint_translation[self.cur_frame][0]
+        velocity[1] = 0
+
+        angular_velocity = (R.from_quat(self.joint_orientation[self.cur_frame + 1][0]) * R.from_quat(self.joint_orientation[self.cur_frame][0]).inv()).as_rotvec()
+
+        return self.joint_name, joint_translation, joint_orientation, velocity, angular_velocity
     
     
     def sync_controller_and_character(self, controller, character_state):
@@ -62,10 +148,36 @@ class CharacterController():
         角色状态实际上是一个tuple, (joint_name, joint_translation, joint_orientation),为你在update_state中返回的三个值
         你可以更新他们,并返回一个新的角色状态
         '''
+        _, joint_translation, joint_orientation, velocity, angular_velocity = character_state
+        move_speed = controller.move_speed[0]
         
         # 一个简单的例子，将手柄的位置与角色对齐
-        controller.set_pos(self.cur_root_pos)
-        controller.set_rot(self.cur_root_rot)
+        vel_half_life = 0.6
+        dt = 1./60
+        pos = controller.position
+        delta_pos = (self.cur_root_pos - pos)
+        delta_pos[1] = 0
+        offset_pos = decay_spring_implicit_damping_pos(-delta_pos, 0, vel_half_life, dt)[0]
+        # print(f"Offset pos: {offset_pos}, cur_root_pos: {self.cur_root_pos}, pos: {pos}")
+
+        rot_half_life = 0.2
+        rot = controller.rotation
+        delta_rot = (R.from_quat(self.cur_root_rot) * R.from_quat(rot).inv()).as_rotvec()
+        offset_rot = decay_spring_implicit_damping_rot(-delta_rot, 0, rot_half_life, dt)[0]
+
+        max_length = 0.5 * np.linalg.norm(velocity)
+        offset_pos_norm = np.linalg.norm(offset_pos)
+        # if offset_pos_norm > max_length:
+        #     offset_pos = offset_pos / offset_pos_norm * max_length
+
+        joint_translation[0] += offset_pos
+        joint_orientation[0] = (R.from_rotvec(offset_rot) * R.from_quat(joint_orientation[0])).as_quat()
+
+        # controller.set_pos(self.cur_root_pos + offset_pos)
+        # controller.set_rot((R.from_rotvec(offset_rot) * R.from_quat(self.cur_root_rot)).as_quat())
+
+        # controller.set_pos(self.cur_root_pos)
+        # controller.set_rot(self.cur_root_rot)
         
-        return character_state
+        return self.joint_name, joint_translation, joint_orientation
     # 你的其他代码,state matchine, motion matching, learning, etc.

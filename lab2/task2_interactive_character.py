@@ -23,9 +23,11 @@ class InteractiveUpdate():
         return task.cont    
 
 def main():
+    motion_path = 'test_motion'
+    # motion_path = 'motion_material'
     viewer = SimpleViewer()
     controller = Controller(viewer)
-    character_controller = CharacterController(controller)
+    character_controller = CharacterController(controller, motion_path)
     task = InteractiveUpdate(viewer, controller, character_controller)
     viewer.addTask(task.update)
     viewer.run()

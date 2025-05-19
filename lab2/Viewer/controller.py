@@ -199,13 +199,16 @@ class Controller:
         self._node = self.futures[0]
         self.init_key_input()
         self.halflife = 0.27
-        self.move_speed = np.array([1.75, 1.5, 1.25])
+        self.move_speed = np.array([1.75, 1.5, 1.25]) * 0.7
     @property
     def node(self):
         return self._node
     @property
     def rotation(self):
         return np.array(self.node.get_quat())[[1,2,3,0]]
+    @property
+    def position(self):
+        return np.array(self.node.get_pos())
     @property
     def cameractrl(self):
         return self.viewer.cameractrl
@@ -354,6 +357,7 @@ class Controller:
     def set_rot(self, rot):
         rot = rot.copy()
         facing = R.from_quat(rot).apply(np.array([0,0,1]))
+        # facing = rot
         facing_xz = np.array([facing[0], 0, facing[2]])  
         rot = R.from_rotvec( np.arctan2(facing_xz[0], facing_xz[2]) * np.array([0,1,0]) ).as_quat()
         self.node.set_quat(Quat(rot[3], rot[0], rot[1], rot[2]))

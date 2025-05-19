@@ -36,8 +36,8 @@ def part1_translation_and_rotation(viewer, setting_id):
     
     # 一些不同的设置
     bvh_list = ['motion_material/walk_forward.bvh', 'motion_material/run_forward.bvh', 'motion_material/walk_and_turn_left.bvh']
-    pos_xz_list = [np.array([-4,4]), np.array([2,4]), np.array([6,1])]
-    facing_xz_list = [np.array([1,1]), np.array([5,1]), np.array([1,1])]
+    pos_xz_list = [np.array([-4,4]), np.array([2,4]), np.array([0,0])]
+    facing_xz_list = [np.array([1,1]), np.array([5,1]), np.array([1,0])]
     frame_list = [0, -1, -1]
     
     # 读取设置
@@ -48,6 +48,7 @@ def part1_translation_and_rotation(viewer, setting_id):
 
     original_motion = BVHMotion(bvh)
     new_motion = original_motion.translation_and_rotation(frame, pos, facing_xz)
+    # new_motion = original_motion
     
     translation, orientation = new_motion.batch_forward_kinematics()
     task = ShowBVHUpdate(viewer, new_motion.joint_name, translation, orientation) 
@@ -88,8 +89,9 @@ def part3_build_loop(viewer):
     # 不用自己写(但是你可以试着写一下)
     # 推荐阅读 https://theorangeduck.com/
     # Blog名称: Creating Looping Animations from Motion Capture
+    # https://theorangeduck.com/page/creating-looping-animations-motion-capture
     motion = BVHMotion('motion_material/run_forward.bvh')
-    motion = build_loop_motion(motion)
+    motion = part3_build_loop_motion(motion)
     
     pos = motion.joint_position[-1,0,[0,2]]
     rot = motion.joint_rotation[-1,0]
@@ -135,10 +137,10 @@ def main():
     # 请自行取消需要的注释并更改测试setting_id
     # 请不要同时取消多个注释，否则前者会被后者覆盖
     
-    part1_translation_and_rotation(viewer, 0) # 数字代表不同的测试setting
-    # part2_interpolate(viewer, 1) # 数字代表不同期望的前进速度
-    # part3_build_loop(viewer)
-    # part4_concatenate(viewer, 0) # 数字代表不同的测试setting
+    # part1_translation_and_rotation(viewer, 2) # 数字代表不同的测试setting
+    # part2_interpolate(viewer, 2.5) # 数字代表不同期望的前进速度
+    part3_build_loop(viewer)
+    # part4_concatenate(viewer, 1) # 数字代表不同的测试setting
     viewer.run()
     
 if __name__ == '__main__':

@@ -70,7 +70,7 @@ res.joint_position[:, 0, [0,2]] += offset
 而插值动作时，我们会面临动作长度不一的问题。因为一般走路，跑步动作都是左右脚各迈一次，速度不同必然导致动作时间不同。假设走路，跑步的速度为v1,v2，动作帧数为n1,n2。那么如果想获得速度为v3的动作，左右脚各迈一次的时间为
 
 $$
-n = \frac{w_1\*v_1\*n_1+w_2\*v_2\*n_2}{v}
+n = \frac{w_1*v_1*n_1+w_2*v_2*n_2}{v}
 $$
 
 其中w为混合权重
@@ -195,3 +195,139 @@ $$
 需要提交的文件是`answer_task1.py`和`answer_task2.py`。 如果是learning-based需要提交一个预训练好的模型。如果自己切割了一些bvh需要上传可以一起上传。如果文件过大可以附加链接。但是尽量不要太大避免助教无法从网盘成功下载。。。
 
 如有问题或Bug，可以在issue，QQ群和我们的[课程讨论版](https://github.com/GAMES-105/GAMES-105/discussions)内进行讨论。
+
+
+## 问题
+我尝试基于惯性插值将两个动作拼接, 具体代码如下:
+```python
+class BVHMotion():
+    ...
+
+    def translation_and_rotation(self, frame_num, target_translation_xz, target_facing_direction_xz):
+        '''
+        计算出新的 joint_position 和 joint_rotation
+        使第 frame_num 帧的根节点平移为 target_translation_xz, 水平面朝向为 target_facing_direction_xz
+        frame_num: int
+        target_translation_xz: (2,)的ndarray
+        target_faceing_direction_xz: (2,)的ndarray，表示水平朝向。你可以理解为原本的z轴被旋转到这个方向。
+        '''
+        
+        res = self.raw_copy() # 拷贝一份，不要修改原始数据
+        
+        target_y_matrix = get_rotation_matrix_y(target_facing_direction_xz[0], target_facing_direction_xz[1])
+        y_matrix, xz_matrix = self.decompose_rotation_with_yaxis(res.joint_rotation[frame_num, 0])
+        offset_matrix = target_y_matrix @ y_matrix.T
+
+        root_rotation = R.from_quat(res.joint_rotation[:, 0]).as_matrix()
+        root_rotation = offset_matrix @ root_rotation
+
+        res.joint_position[:, 0] = (offset_matrix @ res.joint_position[:, 0].reshape(-1, 3, 1)).reshape(-1, 3)
+
+        res.joint_position[:, 0, [0,2]] -= res.joint_position[frame_num, 0, [0,2]]        
+        res.joint_rotation[:, 0] = R.from_matrix(root_rotation).as_quat()
+        res.joint_position[:, 0, [0,2]] += target_translation_xz
+
+        return res
+
+def quat_to_avel(rot, dt):
+    '''
+    用有限差分计算角速度, 假设第一维度是时间
+    '''
+    rot = align_quat(rot, inplace=False)
+    quat_diff = (rot[1:] - rot[:-1])/dt
+    quat_diff[...,-1] = (1 - np.sum(quat_diff[...,:-1]**2, axis=-1)).clip(min = 0)**0.5
+    quat_tmp = rot[:-1].copy()
+    quat_tmp[...,:3] *= -1
+    shape = quat_diff.shape[:-1]
+    rot_tmp = R.from_quat(quat_tmp.reshape(-1, 4)) * R.from_quat(quat_diff.reshape(-1, 4))
+    return 2 * rot_tmp.as_quat().reshape( shape + (4, ) )[...,:3]
+
+def halflife2dampling(halflife):
+    return 4 * math.log(2) / halflife
+
+def decay_spring_implicit_damping_pos(pos, vel, halflife, dt):
+    '''
+    一个阻尼弹簧, 用来衰减位置
+    '''
+    d = halflife2dampling(halflife)/2
+    j1 = vel + d * pos
+    eydt = math.exp(-d * dt)
+    pos = eydt * (pos+j1*dt)
+    vel = eydt * (vel - j1 * dt * d)
+    return pos, vel
+
+def decay_spring_implicit_damping_rot(rot, avel, halflife, dt):
+    '''
+    一个阻尼弹簧, 用来衰减旋转
+    '''
+    d = halflife2dampling(halflife)/2
+    j0 = rot
+    j1 = avel + d * j0
+    eydt = math.exp(-d * dt)
+    a1 = eydt * (j0+j1*dt)
+    
+    rot_res = R.from_rotvec(a1).as_rotvec()
+    avel_res = eydt * (avel - j1 * dt * d)
+    return rot_res, avel_res
+
+def translation_motions(motion1, motion2, end1, start2, max_length = 60):
+    """
+    将 motion1 的第 end1 帧和 motion2 的第 start2 帧连接起来
+    """
+    fps = 60
+    half_life = 0.2
+    res = BVHMotion()
+    res.joint_name = motion2.joint_name
+    res.joint_parent = motion2.joint_parent
+    res.joint_channel = motion2.joint_channel
+    res.joint_position = motion2.joint_position[start2:start2+max_length]
+    res.joint_rotation = motion2.joint_rotation[start2:start2+max_length]
+
+    now_pos = motion1.joint_position[end1, 0, [0,2]]
+    now_dir = R.from_quat(motion1.joint_rotation[end1, 0]).apply(np.array([0,0,1])).flatten()[[0,2]]
+    motion2 = res.translation_and_rotation(0, now_pos, now_dir)
+
+    rotations = np.concatenate([motion1.joint_rotation[end1-1:end1+1], motion2.joint_rotation], axis=0)
+    positions = np.concatenate([motion1.joint_position[end1-1:end1+1], motion2.joint_position], axis=0)
+    motion_length = positions.shape[0]
+
+    avel = quat_to_avel(rotations, 1/60)
+
+    # 计算最后一帧和第一帧的旋转差
+    rot_diff = (R.from_quat(rotations[2]) * R.from_quat(rotations[1].copy()).inv()).as_rotvec()
+    avel_diff = (avel[1] - avel[0])
+
+    coeff = 0
+
+    # 将旋转差均匀分布到每一帧
+    for i in range(2, motion_length):
+        offset = decay_spring_implicit_damping_rot(
+            (coeff - 1.)*rot_diff, (coeff - 1.)*avel_diff, half_life, (i-1)/fps
+        )
+        offset_rot = R.from_rotvec(offset[0])
+        rotations[i] = (offset_rot * R.from_quat(rotations[i])).as_quat()
+
+    pos_diff = positions[2] - positions[1]
+    pos_diff[:,[0,2]] = 0
+    vel1 = positions[1] - positions[0]
+    vel2 = positions[3] - positions[2]
+    vel_diff = (vel1 - vel2)/60
+
+    for i in range(2, motion_length):
+        offset = decay_spring_implicit_damping_pos(
+            (coeff - 1.)*pos_diff, (coeff - 1.)*vel_diff, half_life, (i-1)/fps
+        )
+        offset_pos = offset[0]
+        positions[i] += offset_pos
+
+    positions = positions[2:]
+    rotations = rotations[2:]
+
+    res.joint_position = positions
+    res.joint_rotation = rotations
+    
+    return res
+
+```
+
+但是我遇到一些问题, 我目前的代码在两个动作切换的那一帧会有明显的卡顿感, 请问这种卡顿感可能的原因是什么?
